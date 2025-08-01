@@ -1,0 +1,87 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>AI API ↔ AGI Investment Simulation</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  body{font-family:sans-serif;margin:20px;line-height:1.4}
+  h2{margin-bottom:0.5rem}
+  .control{margin-bottom:0.75rem}
+  label{display:inline-block;width:220px}
+  input[type=range]{width:260px;vertical-align:middle}
+  span.val{display:inline-block;width:60px;text-align:right;padding-left:6px}
+  button{padding:6px 12px;border-radius:6px;border:1px solid #888;cursor:pointer}
+  canvas{margin-top:20px;border:1px solid #ddd;border-radius:8px}
+</style>
+</head>
+<body>
+<h2>Dynamische Simulation: Preisstrategie & F&E‑Allokation</h2>
+<p>Regle die Schieberegler und klicke <strong>Run Simulation</strong>, um den Verlauf von Gewinn und Gründer‑Nutzen über 24 Perioden (etwa Monate) zu sehen.</p>
+<div class="control"><label>API‑Preis p<sub>A</sub> ($/Token):</label><input type="range" id="pA" min="0.001" max="0.05" step="0.001" value="0.02"><span class="val" id="pA_val"></span></div>
+<div class="control"><label>Abo‑Preis p<sub>S</sub> ($/Monat):</label><input type="range" id="pS" min="10" max="200" step="5" value="50"><span class="val" id="pS_val"></span></div>
+<div class="control"><label>F&E‑Anteil a (0–1):</label><input type="range" id="a" min="0" max="1" step="0.05" value="0.3"><span class="val" id="a_val"></span></div>
+<div class="control"><label>AGI‑Drive φ:</label><input type="range" id="phi" min="0" max="1000" step="50" value="0"><span class="val" id="phi_val"></span></div>
+<button id="run">Run Simulation</button>
+<canvas id="chart" width="800" height="400"></canvas><script>
+// -------- feste Parameter des Modells --------
+const P = {
+  alphaA: 1e9,      // Marktvolumen Tokens
+  alphaS: 1e5,      // Marktvolumen Abos
+  beta:   1.2,      // Qualitäts‑Elastizität API
+  gamma:  0.8,      // Qualitäts‑Elastizität Abo
+  eps:    1.3,      // Preis‑Elastizität API
+  eta:    1.1,      // Preis‑Elastizität Abo
+  kServ:  1e-6,     // GPU‑Flops pro Token
+  Ctot:   1e5,      // verfügbare Flops/s (normiert)
+  theta:  1e-4,     // Lernrate (F&E‑Effizienz)
+  delta:  0.01,     // Obsoleszenzrate
+  cGpu:   1e-5,     // Kosten/Flop
+  r:      0.01      // Diskontsatz (wird hier nicht diskontiert)
+};
+// -------- Hilfsfunktionen --------
+function simulate(pA, pS, a, phi, periods = 24){
+  let q = 1;                      // Startqualität
+  const t = [], profit = [], util = [];
+  for(let k = 0; k < periods; k++){
+    // Nachfrage berechnen
+    let DA = P.alphaA * Math.pow(q, P.beta) * Math.pow(pA, -P.eps);
+    DA = Math.min(DA, (1 - a) * P.Ctot / P.kServ);   // Kapazitäts‑Cap
+    const DS = P.alphaS * Math.pow(q, P.gamma) * Math.pow(pS, -P.eta);
+    // Gewinn & Nutzen
+    const pi = pA * DA + pS * DS - P.cGpu * (P.kServ * DA + a * P.Ctot);
+    profit.push(pi);
+    util.push(pi + phi * q);
+    t.push(k + 1);
+    // Qualitäts‑Update
+    q = q + P.theta * a * P.Ctot - P.delta * q;
+  }
+  return {t, profit, util};
+}
+// -------- UI‑Update --------
+const ids = ['pA','pS','a','phi'];
+function showValues(){
+  ids.forEach(id => {
+    document.getElementById(id + '_val').textContent = document.getElementById(id).value;
+  });
+}
+ids.forEach(id => document.getElementById(id).addEventListener('input', showValues));
+showValues();
+
+let chart;
+run.addEventListener('click', () => {
+  const res = simulate(parseFloat(pA.value), parseFloat(pS.value), parseFloat(a.value), parseFloat(phi.value));
+  if(chart) chart.destroy();
+  chart = new Chart(document.getElementById('chart'), {
+    type: 'line',
+    data: {
+      labels: res.t,
+      datasets: [
+        {label: 'Profit',     data: res.profit, borderWidth: 1, fill: false},
+        {label: 'Utility',    data: res.util,   borderWidth: 1, borderDash: [5,5], fill: false}
+      ]
+    },
+    options: {responsive: false, scales: {x: {title: {display:true,text:'Periode'}}, y:{title:{display:true,text:'$'}}}}
+  });
+});
+</script></body>
+</html>
